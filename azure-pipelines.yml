@@ -1,0 +1,150 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+#Se ejecuta automáticamente al hacer push a una rama.
+#trigger:
+#  branches:
+#    include:
+#      - dev
+# Ejecutar para PR(Pull Request) hacia main
+pr:
+  branches:
+    include:
+      - qa
+pool:
+  name: Azure Pipelines # <-- Linux
+  #name: azure-devops-vmss # <-- Windows
+  #name: mdp-ado-demo
+  #vmImage: ubuntu-latest
+
+parameters:
+  - name: branchName
+    displayName: "Nombre de la rama"
+    type: string
+    default: ""
+  - name: commitMessage
+    displayName: "Mensaje del commit"
+    type: string
+    default: ""
+
+variables:
+  branchName: ${{parameters.branchName}}
+
+stages:
+- stage: BuildApp
+  displayName: Build Apps
+  #only runs on different branches of 'main', 'qa' , 'dev'
+  condition: and(
+    eq(variables['Build.SourceBranchName'], variables['branchName']),
+    ne(variables['branchName'], '')
+    )
+  jobs:
+  - job: OneToOneManagementAppCI
+    displayName: One To One Management App - CI
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: true   # <-- MUY IMPORTANTE para evitar el error de GitHub (no puede leer username)
+
+    - task: PowerPlatformToolInstaller@2
+      inputs:
+        DefaultVersion: true
+    - task: PowerPlatformExportSolution@2
+      inputs:
+        authenticationType: 'PowerPlatformSPN'
+        PowerPlatformSPN: 'Power Platform Default'
+        SolutionName: '$(SolutionName)'
+        SolutionOutputFile: '$(Build.StagingDirectory)/$(SolutionName)_Unmanaged.zip' 
+        AsyncOperation: true
+        MaxAsyncWaitTime: '60'    
+    - task: PowerPlatformUnpackSolution@2
+      inputs:
+        SolutionInputFile: '$(Build.StagingDirectory)/$(SolutionName)_Unmanaged.zip'
+        SolutionTargetFolder: '$(Build.SourcesDirectory)/$(SolutionName)/Unmanaged'
+        OverwriteFiles: true
+    - task: CmdLine@2
+      inputs:
+        script: |
+          echo "*************************************************************************************"
+          echo "===> Configurando Git"
+          git config --global user.email "julianbravo@sandboxseti.onmicrosoft.com"
+          git config --global user.name "Julian Dario Bravo Tuay"
+          echo "*************************************************************************************"
+          echo git remote
+          git remote -v
+          echo "*************************************************************************************"
+          echo "===> Obteniendo todas las ramas remotas"
+          echo git pull
+          git pull
+          echo "*************************************************************************************"
+          echo "===> Mostrando ramas disponibles"
+          echo git branch -a
+          git branch -a
+          echo "*************************************************************************************"
+          echo "===> Cambiando a la rama actual del pipeline"
+          echo git checkout ${{parameters.branchName}}
+          git checkout ${{parameters.branchName}}
+          echo "*************************************************************************************"
+          echo "===> Verificando rama activa"
+          git branch --show-current
+          echo "*************************************************************************************"
+          echo "===> Cambios detectados por Git"
+          git status
+          git diff --stat
+          echo "*************************************************************************************"
+          echo "===> Intentando hacer commit"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "${{parameters.commitMessage}}"
+            git push origin ${{parameters.branchName}}
+          else
+            echo "No hay cambios que commitear"
+          fi
+
+## QA
+- stage: DeployQA
+  displayName: Deploy to QA environment
+  condition: eq(variables['Build.SourceBranchName'], 'qa')
+  jobs:
+  - job: DeployQA
+    displayName: Deploy solution to QA
+    steps:
+    - task: PowerPlatformToolInstaller@2
+      inputs:
+        DefaultVersion: true
+    - task: PowerPlatformPackSolution@2
+      inputs:
+        SolutionSourceFolder: '$(Build.SourcesDirectory)/$(SolutionName)/Unmanaged'
+        SolutionOutputFile: '$(Build.ArtifactStagingDirectory)/$(SolutionName)_Unmanaged.zip'
+    - task: PowerPlatformImportSolution@2
+      inputs:
+        authenticationType: 'PowerPlatformSPN'
+        PowerPlatformSPN: 'Power Platform Default QA'
+        SolutionInputFile: '$(Build.ArtifactStagingDirectory)/$(SolutionName)_Unmanaged.zip'
+        AsyncOperation: true
+        MaxAsyncWaitTime: '60'
+    - task: PowerPlatformPublishCustomizations@2
+      inputs:
+        authenticationType: 'PowerPlatformSPN'
+        PowerPlatformSPN: 'Power Platform Default QA'
+        AsyncOperation: true
+        MaxAsyncWaitTime: '60'
+## PROD
+- stage: DeployProd
+  displayName: Deploy to PROD environment
+  #condition: eq(variables['Build.SourceBranchName'], 'main')
+  #pool:
+    #vmImage: 'macOS-10.14'
+  jobs:
+  - job: DeployProd
+    displayName: Deploy Solution to PROD
+    steps:
+    - script: |
+        echo deploying Solution app to PROD
+        echo "Branch: $(Build.SourceBranch)"
+        echo "BranchName: $(Build.SourceBranchName)"
+        echo "Parametro branchName: $(branchName)"
+
+      displayName: deploy Solution app to PROD
