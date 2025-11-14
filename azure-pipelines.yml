@@ -4,7 +4,7 @@
 # https://aka.ms/yaml
 
 #Se ejecuta automáticamente al hacer push a una rama.
-#trigger:
+trigger: none
 #  branches:
 #    include:
 #      - dev
